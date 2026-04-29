@@ -48,7 +48,6 @@ jobs:
             RAW_NAME="downloaded_file"
           fi
           
-          # جدا کردن نام پایه و پسوند
           EXT="${RAW_NAME##*.}"
           if [[ "$EXT" == "$RAW_NAME" ]]; then
             EXT=""
@@ -87,10 +86,8 @@ jobs:
           EXT="${{ steps.filename.outputs.ext }}"
           CUSTOM_NAME="${{ github.event.inputs.file_rename }}"
           
-          # اگر کاربر نام دلخواه داد از آن استفاده کن
           if [[ -n "$CUSTOM_NAME" ]]; then
             FINAL_NAME="Raven_${CUSTOM_NAME}"
-            # استخراج base از نام دلخواه
             if [[ "$CUSTOM_NAME" == *.* ]]; then
               ARCHIVE_BASE="Raven_${CUSTOM_NAME%.*}"
             else
@@ -125,6 +122,24 @@ jobs:
           echo "✅ آرشیو ساخته شد:"
           ls -lh "${ARCHIVE_BASE}.7z"* 2>/dev/null || echo "هیچ فایلی ساخته نشد"
 
+      - name: 📁 سازمان‌دهی فایل‌ها (فقط برای فایل‌های چندتکه)
+        id: organize
+        run: |
+          ARCHIVE_BASE="${{ steps.naming.outputs.archive_base }}"
+          
+          if [[ -f "${ARCHIVE_BASE}.7z.001" ]]; then
+            # فایل بزرگ → ساخت پوشه و انتقال همه تکه‌ها به داخل آن
+            mkdir -p "${ARCHIVE_BASE}"
+            mv "${ARCHIVE_BASE}.7z."* "${ARCHIVE_BASE}/" 2>/dev/null || true
+            echo "is_multi=true" >> $GITHUB_OUTPUT
+            echo "📁 فایل‌های تکه‌تکه به پوشه ${ARCHIVE_BASE}/ منتقل شدند"
+            echo "folder=${ARCHIVE_BASE}" >> $GITHUB_OUTPUT
+          else
+            # فایل کوچک → همان یک فایل .7z در ریشه باقی می‌ماند
+            echo "is_multi=false" >> $GITHUB_OUTPUT
+            echo "📄 فایل کوچک، در ریشه نگه داشته می‌شود"
+          fi
+
       - name: 🗑️ حذف فایل اصلی
         run: |
           rm -f "${{ steps.naming.outputs.final_name }}"
@@ -135,17 +150,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: ⬆️ آپلود تکه‌ها به مخزن
+      - name: ⬆️ آپلود به مخزن
         run: |
+          IS_MULTI="${{ steps.organize.outputs.is_multi }}"
           ARCHIVE_BASE="${{ steps.naming.outputs.archive_base }}"
           
-          echo "📋 فایل‌های موجود برای آپلود:"
-          ls -la "${ARCHIVE_BASE}.7z"* 2>/dev/null || echo "هیچ فایلی پیدا نشد"
+          if [[ "$IS_MULTI" == "true" ]]; then
+            # اضافه کردن پوشه (همه تکه‌ها داخلش)
+            git add "${ARCHIVE_BASE}/"
+          else
+            # اضافه کردن تک فایل .7z
+            git add "${ARCHIVE_BASE}.7z"
+          fi
           
-          # اضافه کردن فایل‌ها با find برای اطمینان
-          find . -maxdepth 1 -name "${ARCHIVE_BASE}.7z*" -type f -exec git add {} \; 2>/dev/null || true
-          
-          echo "📊 وضعیت فایل‌های stage شده:"
+          echo "📊 وضعیت staging:"
           git status
           
           if ! git diff --staged --quiet; then
@@ -159,7 +177,7 @@ jobs:
             fi
           else
             echo "⚠️ هیچ فایلی stage نشده است!"
-            echo "📁 محتویات کامل پوشه:"
+            echo "📁 محتویات پوشه:"
             ls -la
             exit 1
           fi
@@ -170,7 +188,10 @@ jobs:
           echo ""
           echo "=============================================="
           echo "🎉 عملیات با موفقیت انجام شد!"
-          echo ""
-          echo "📁 فایل‌های آرشیو در مخزن شما ذخیره شدند."
+          if [[ -d "${ARCHIVE_BASE}" ]]; then
+            echo "📁 فایل‌ها در پوشه ${ARCHIVE_BASE}/ قرار دارند."
+          else
+            echo "📄 فایل در ریشه مخزن (${ARCHIVE_BASE}.7z) ذخیره شد."
+          fi
           echo "📥 حالا می‌توانید از صفحه اصلی مخزن دانلود کنید."
           echo "=============================================="
